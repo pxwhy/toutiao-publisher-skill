@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -19,7 +21,7 @@ from account_paths import SKILL_ROOT, build_account_paths, display_path
 
 
 DEFAULT_LOGIN_URL = "https://mp.toutiao.com/"
-VERIFICATION_PATTERNS = ["验证码", "滑块", "安全验证", "环境异常", "操作频繁", "登录已失效"]
+VERIFICATION_PATTERNS = ["滑块", "安全验证", "环境异常", "操作频繁", "登录已失效", "身份验证"]
 LOGIN_SUCCESS_PATTERNS = ["发布", "创作", "作品管理", "头条号发文规范", "首页", "消息"]
 
 
@@ -65,6 +67,7 @@ def main() -> None:
         if args.qr:
             qr_path = save_login_qr(page, login_dir)
             print(f"二维码截图：{display_path(qr_path)}", flush=True)
+            print(f"最新二维码固定路径：{display_path(login_dir / 'login-qr.png')}", flush=True)
             print(f"请扫码登录，最多等待 {args.qr_timeout} 秒。", flush=True)
             wait_for_login(page, args.qr_timeout, login_dir)
         else:
@@ -90,7 +93,9 @@ def main() -> None:
 
 def save_login_qr(page, login_dir: Path) -> Path:
     page.wait_for_timeout(4000)
-    qr_path = login_dir / "login-qr.png"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    qr_path = login_dir / f"login-qr-{timestamp}.png"
+    latest_path = login_dir / "login-qr.png"
     candidates = [
         "img[src*='qr']",
         "canvas",
@@ -104,10 +109,12 @@ def save_login_qr(page, login_dir: Path) -> Path:
             locator = page.locator(selector).first
             locator.wait_for(state="visible", timeout=2500)
             locator.screenshot(path=str(qr_path), timeout=5000)
+            shutil.copy2(qr_path, latest_path)
             return qr_path
         except Exception:
             continue
     page.screenshot(path=str(qr_path), full_page=True, timeout=8000)
+    shutil.copy2(qr_path, latest_path)
     return qr_path
 
 
@@ -118,6 +125,10 @@ def wait_for_login(page, timeout_seconds: int, login_dir: Path) -> None:
         detect_verification(page)
         if is_logged_in(page):
             return
+        if refresh_expired_qr(page):
+            qr_path = save_login_qr(page, login_dir)
+            print(f"二维码已刷新：{display_path(qr_path)}", flush=True)
+            print(f"最新二维码固定路径：{display_path(login_dir / 'login-qr.png')}", flush=True)
         try:
             page.screenshot(path=str(last_screenshot), full_page=True, timeout=5000)
         except Exception:
@@ -134,6 +145,30 @@ def is_logged_in(page) -> bool:
     if "profile_v4" in url and "login" not in url and "passport" not in url and "sso" not in url:
         return True
     return False
+
+
+def refresh_expired_qr(page) -> bool:
+    text = safe_body_text(page)
+    if not any(pattern in text for pattern in ["二维码已失效", "二维码已过期", "刷新二维码"]):
+        return False
+    locators = [
+        page.get_by_text("点击刷新", exact=False).last,
+        page.locator("[class*='refresh']").last,
+        page.locator("canvas").last,
+    ]
+    for locator in locators:
+        try:
+            locator.click(timeout=3000)
+            page.wait_for_timeout(2000)
+            return True
+        except Exception:
+            continue
+    try:
+        page.reload(wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
+        return True
+    except Exception:
+        return False
 
 
 def detect_verification(page) -> None:

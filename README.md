@@ -28,6 +28,20 @@
 python scripts/login.py --account default
 ```
 
+服务器二维码登录：
+
+```bash
+python scripts/login.py --account default --qr --headless
+```
+
+二维码截图默认输出到：
+
+```text
+data/accounts/default/login/login-qr.png
+```
+
+扫码成功后脚本会自动保存登录态。等待时间可通过 `--qr-timeout` 调整。
+
 发布：
 
 ```bash

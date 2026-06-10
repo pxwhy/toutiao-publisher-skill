@@ -62,6 +62,26 @@ python scripts/login.py --account my-toutiao --login-url "https://mp.toutiao.com
 
 脚本会打开有头浏览器。用户自行完成扫码、短信验证码或账号登录后，回到终端按 Enter 保存 session。
 
+服务器二维码登录：
+
+```bash
+python scripts/login.py --account default --qr --headless
+```
+
+脚本会保存二维码截图并轮询登录状态：
+
+```text
+data/accounts/default/login/login-qr.png
+```
+
+用户用手机扫码登录后，脚本自动保存 session。可调整等待时间：
+
+```bash
+python scripts/login.py --account default --qr --headless --qr-timeout 300
+```
+
+二维码模式只截图登录页面，不读取短信验证码、不绕过验证码、滑块或风控。
+
 ## 发布
 
 ```bash

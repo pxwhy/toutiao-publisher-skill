@@ -1,0 +1,48 @@
+{
+  "publish_url": "https://mp.toutiao.com/profile_v4/graphic/publish",
+  "work_management": {
+    "entry": "#masterRoot > div > div.pgc-content > section > aside > div > div > div > div.byte-menu-inline.management_tab > div.byte-menu-inline-content > div.byte-menu-item.selected > span > a > span",
+    "tabs": {
+      "all": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div.byte-tabs-header-title.active",
+      "article": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div:nth-child(2)",
+      "video": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div:nth-child(3)",
+      "weitoutiao": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div:nth-child(4)",
+      "short_video": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div.byte-tabs-header-title.active > span",
+      "audio": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div:nth-child(6)",
+      "collection": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div:nth-child(7) > span",
+      "draft": "#masterRoot > div > div.pgc-content > section > main > div.work-manage-header.menu-tab-wrapper.sticky > div > div.byte-tabs-header-nav.byte-tabs-header-nav-horizontal.byte-tabs-header-size-default > div > div > div.byte-tabs-header-title.active > span > span"
+    },
+    "status": {
+      "all": "#root > div > div.filter-wrapper > div.filter-field.status-filter-list > span.filter-item.selected",
+      "published": "#root > div > div.filter-wrapper > div.filter-field.status-filter-list > span:nth-child(3)",
+      "reviewing": "#root > div > div.filter-wrapper > div.filter-field.status-filter-list > span:nth-child(4)",
+      "rejected": "#root > div > div.filter-wrapper > div.filter-field.status-filter-list > span:nth-child(5)",
+      "private": "#root > div > div.filter-wrapper > div.filter-field.status-filter-list > span:nth-child(6)"
+    }
+  },
+  "article_publish": {
+    "title": "#root > div > div.left-column > div > div.publish-editor > div.publish-editor-title-wrapper > div > div > div.title-wrapper > div > div > div > textarea",
+    "content": "#root > div > div.left-column > div > div.publish-editor > div.syl-editor-wrap > div > div.ProseMirror > p > span",
+    "cover": {
+      "single": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div:nth-child(1) > div > div.edit-input > div > div.byte-radio-group.byte-radio-size-default.byte-radio-mode-outline.pgc-radio.article-cover-radio-group > label:nth-child(1) > span",
+      "triple": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div:nth-child(1) > div > div.edit-input > div > div.byte-radio-group.byte-radio-size-default.byte-radio-mode-outline.pgc-radio.article-cover-radio-group > label:nth-child(2) > span",
+      "none": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div:nth-child(1) > div > div.edit-input > div > div.byte-radio-group.byte-radio-size-default.byte-radio-mode-outline.pgc-radio.article-cover-radio-group > label:nth-child(3) > span",
+      "upload": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div:nth-child(1) > div > div.edit-input > div > div.article-cover-images-wrap > div.article-cover-images > div > div > div > div"
+    },
+    "location": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div.pgc-edit-cell.edit-cell.position-cell > div.edit-input > div > div > div.byte-select-view-inner > div",
+    "ad": {
+      "enable_revenue": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div.pgc-edit-cell.edit-cell.required > div.edit-input > div > span > label > span",
+      "disable": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div.pgc-edit-cell.edit-cell.required > div.edit-input > div > label > span"
+    },
+    "first_publish": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div:nth-child(4) > div.edit-input > div > div.exclusive-checkbox-wraper > label > span",
+    "sync_weitoutiao": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div.form-item > div > div.edit-input > span > label",
+    "work_declaration": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div.source-wrap > div > div.edit-input > div > div",
+    "preview_and_publish": "#root > div > div.left-column > div > div.publish-footer.inline-editor > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.publish-btn.publish-btn-last",
+    "confirm_publish": "#root > div > div.left-column > div > div.publish-footer.inline-editor > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.publish-btn.publish-btn-last"
+  },
+  "modal": {
+    "content": "body > div:nth-child(43) > div.byte-modal-wrapper.zoomModal-appear-done.zoomModal-enter-done > div > div:nth-child(2) > div.byte-modal-content",
+    "confirm": "body > div:nth-child(43) > div.byte-modal-wrapper.zoomModal-appear-done.zoomModal-enter-done > div > div:nth-child(2) > div.byte-modal-footer > button.byte-btn.byte-btn-primary.byte-btn-size-default.byte-btn-shape-square",
+    "cancel": "body > div:nth-child(43) > div.byte-modal-wrapper.zoomModal-appear-done.zoomModal-enter-done > div > div:nth-child(2) > div.byte-modal-footer > button.byte-btn.byte-btn-default.byte-btn-size-default.byte-btn-shape-square"
+  }
+}

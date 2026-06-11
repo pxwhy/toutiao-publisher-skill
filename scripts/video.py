@@ -118,6 +118,7 @@ def run_publish(args: argparse.Namespace, payload: dict, state_path: Path, run_d
             page = context.new_page()
             open_video_publish(page, selectors, log)
             upload_video(page, video_path, selectors, args.upload_timeout, log)
+            dismiss_benefit_modal(page, log)
             fill_title(page, title, selectors, log)
             fill_description(page, description, selectors, log)
             upload_cover(page, cover_path, selectors, log)
@@ -244,8 +245,10 @@ def wait_video_upload_ready(page, selectors: dict, timeout_seconds: int, log) ->
 def fill_title(page, title: str, selectors: dict, log) -> None:
     locators = [
         locator_from_selector(page, selector_value(selectors, "video_publish.title")),
+        page.locator(".form-item-title input").first,
+        page.locator("input[maxlength='30']").first,
         page.locator("input[placeholder*='标题']").first,
-        page.locator("input").first,
+        page.locator("input:visible").first,
     ]
     if fill_first(locators, title, log, "video title"):
         return
@@ -271,40 +274,162 @@ def upload_cover(page, cover_path: Path | None, selectors: dict, log) -> None:
     if not cover_path:
         write_log(log, "video cover skipped: cover_image not provided")
         return
-    cover = locator_from_selector(page, selector_value(selectors, "video_publish.cover"))
-    if cover is None:
-        cover = page.locator(".form-item-poster").first
-    try:
-        with page.expect_file_chooser(timeout=8000) as chooser_info:
-            cover.click(timeout=8000)
-        chooser_info.value.set_files(str(cover_path))
-        page.wait_for_timeout(3000)
-        write_log(log, f"uploaded video cover by file chooser: {display_path(cover_path)}")
+    locators = [
+        locator_from_selector(page, selector_value(selectors, "video_publish.cover")),
+        page.get_by_text("上传封面", exact=True).last,
+        page.locator(".form-item-poster").get_by_text("上传封面", exact=True).last,
+        page.locator(".form-item-poster").locator("div").filter(has_text="上传封面").last,
+        page.locator(".form-item-poster").first,
+    ]
+    for locator in locators:
+        if locator is None:
+            continue
+        try:
+            locator.wait_for(state="visible", timeout=3000)
+            locator.scroll_into_view_if_needed(timeout=3000)
+            with page.expect_file_chooser(timeout=6000) as chooser_info:
+                locator.click(timeout=5000)
+            chooser_info.value.set_files(str(cover_path))
+            page.wait_for_timeout(3000)
+            finish_video_cover_dialog(page, selectors, log)
+            write_log(log, f"uploaded video cover by file chooser: {display_path(cover_path)}")
+            return
+        except Exception as exc:
+            write_log(log, f"video cover chooser candidate failed: {exc}")
+            try:
+                locator.click(timeout=2000)
+                page.wait_for_timeout(1000)
+                if set_cover_file_input(page, cover_path, selectors, log):
+                    return
+            except Exception:
+                continue
+    if set_cover_file_input(page, cover_path, selectors, log):
         return
-    except Exception as exc:
-        write_log(log, f"video cover file chooser failed: {exc}")
+    raise RuntimeError("视频封面上传失败")
+
+
+def set_cover_file_input(page, cover_path: Path, selectors: dict, log) -> bool:
+    click_cover_local_upload(page, selectors, log)
+    inputs = [
+        page.locator(".Dialog-container input[type='file'][accept*='image']").first,
+        page.locator(".Dialog-container input[type='file']").first,
+        page.locator(".form-item-poster input[type='file']").first,
+        page.locator("input[type='file'][accept*='image']").first,
+    ]
+    for file_input in inputs:
+        try:
+            file_input.set_input_files(str(cover_path), timeout=8000)
+            page.wait_for_timeout(3000)
+            finish_video_cover_dialog(page, selectors, log)
+            write_log(log, f"uploaded video cover by input: {display_path(cover_path)}")
+            return True
+        except Exception as exc:
+            write_log(log, f"video cover input candidate failed: {exc}")
+    return False
+
+
+def click_cover_local_upload(page, selectors: dict, log) -> None:
+    locators = [
+        page.locator(".Dialog-container").get_by_text("本地上传", exact=True).last,
+        page.locator(".Dialog-container li").filter(has_text="本地上传").last,
+        locator_from_selector(page, selector_value(selectors, "video_publish.cover_local_upload")),
+    ]
+    click_first_enabled(locators, log, "video cover local upload", timeout=2000)
+
+
+def finish_video_cover_dialog(page, selectors: dict, log) -> None:
+    dialog = page.locator(".Dialog-container, .byte-modal-wrapper, .byte-drawer-wrapper").filter(has_text="封面").last
     try:
-        cover.click(timeout=5000)
+        if not dialog.is_visible(timeout=2000):
+            return
+    except Exception:
+        return
+    texts = ["下一步", "确定", "完成", "保存"]
+    for _ in range(4):
+        try:
+            if not dialog.is_visible(timeout=1000):
+                return
+        except Exception:
+            return
+        locators = []
+        next_selector = selector_value(selectors, "video_publish.cover_next")
+        if next_selector:
+            locators.append(locator_from_selector(page, next_selector))
+        for text in texts:
+            locators.extend([
+                dialog.get_by_text(text, exact=True).last,
+                dialog.locator("button").filter(has_text=text).last,
+                page.get_by_text(text, exact=True).last,
+            ])
+        if click_first_enabled(locators, log, "video cover dialog confirm", timeout=3000):
+            page.wait_for_timeout(2000)
+            continue
+        break
+    try:
+        if dialog.is_visible(timeout=1000):
+            raise RuntimeError("视频封面弹窗未关闭")
+    except RuntimeError:
+        raise
+    except Exception:
+        return
+
+
+def dismiss_benefit_modal(page, log) -> None:
+    modal = page.locator(".byte-modal-wrapper, .byte-modal").filter(has_text="小视频创作权益").last
+    try:
+        if not modal.is_visible(timeout=2000):
+            return
+    except Exception:
+        return
+    locators = [
+        modal.get_by_text("暂不开通", exact=True).last,
+        modal.locator("button").filter(has_text="暂不开通").last,
+        modal.locator(".byte-modal-close").last,
+        page.get_by_text("暂不开通", exact=True).last,
+    ]
+    if click_first_enabled(locators, log, "video benefit modal dismiss", timeout=3000):
         page.wait_for_timeout(1000)
-        file_input = page.locator("input[type='file'][accept*='image']").first
-        file_input.set_input_files(str(cover_path), timeout=15000)
-        page.wait_for_timeout(3000)
-        write_log(log, f"uploaded video cover by input: {display_path(cover_path)}")
-    except Exception as exc:
-        write_log(log, f"video cover upload skipped/failed: {exc}")
+        return
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
+        write_log(log, "dismissed video benefit modal with Escape")
+    except Exception:
+        write_log(log, "video benefit modal dismiss failed")
 
 
 def handle_options(page, selectors: dict, options: dict, log) -> None:
     if options.get("video_to_article"):
         click_selector(page, selector_value(selectors, "video_publish.video_to_article"), log, "视频生成图文", timeout=3000)
     else:
-        write_log(log, "skip video option: video_to_article")
+        disable_video_to_article(page, selectors, log)
     if options.get("personal_opinion"):
         if click_selector(page, selector_value(selectors, "video_publish.work_declaration"), log, "作品声明", timeout=3000):
             page.wait_for_timeout(1000)
             click_personal_opinion(page, log)
     if options.get("ad_revenue"):
         enable_ad_revenue(page, log)
+
+
+def disable_video_to_article(page, selectors: dict, log) -> None:
+    locators = [
+        page.locator("label").filter(has_text="生成图文").first,
+        page.get_by_text("生成图文", exact=True).last,
+        page.locator(".form-item-video2art").get_by_text("生成图文", exact=True).last,
+        locator_from_selector(page, selector_value(selectors, "video_publish.video_to_article")),
+    ]
+    for locator in locators:
+        if locator is None:
+            continue
+        try:
+            locator.scroll_into_view_if_needed(timeout=3000)
+            locator.click(timeout=3000)
+            page.wait_for_timeout(1000)
+            write_log(log, "disabled video option: video_to_article")
+            return
+        except Exception as exc:
+            write_log(log, f"disable video_to_article candidate failed: {exc}")
+    write_log(log, "skip video option: video_to_article")
 
 
 def click_personal_opinion(page, log) -> None:

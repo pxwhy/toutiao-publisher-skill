@@ -179,6 +179,7 @@ def build_options(payload: dict) -> dict:
         "ad_revenue": bool(options.get("ad_revenue", True)),
         "video_to_article": bool(options.get("video_to_article", False)),
         "personal_opinion": bool(options.get("personal_opinion", True)),
+        "visibility": str(options.get("visibility", "public")).strip().lower(),
     }
 
 
@@ -409,9 +410,71 @@ def handle_options(page, selectors: dict, options: dict, log) -> None:
             click_personal_opinion(page, log)
     if options.get("ad_revenue"):
         enable_ad_revenue(page, log)
+    set_visibility(page, options.get("visibility", "public"), log)
+
+
+def set_visibility(page, visibility: str, log) -> None:
+    visibility_labels = {
+        "public": "公开",
+        "fans": "粉丝可见",
+        "followers": "粉丝可见",
+        "private": "仅我可见",
+        "only_me": "仅我可见",
+        "only-me": "仅我可见",
+    }
+    label_text = visibility_labels.get(str(visibility or "public").strip().lower(), "公开")
+    locators = [
+        page.locator("label").filter(has_text=label_text).last,
+        page.get_by_text(label_text, exact=True).last,
+        page.locator(".video-form-item, .form-item").filter(has_text="谁可以看").locator("label").filter(has_text=label_text).last,
+    ]
+    if click_first_enabled(locators, log, f"video visibility: {label_text}", timeout=3000):
+        return
+    write_log(log, f"video visibility unavailable: {label_text}")
 
 
 def disable_video_to_article(page, selectors: dict, log) -> None:
+    try:
+        toggled = page.evaluate(
+            """
+            () => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const blocks = Array.from(document.querySelectorAll('div, section, label'))
+                .filter((element) => visible(element) && (element.innerText || element.textContent || '').includes('视频生成图文'));
+              const block = blocks.sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width)[0];
+              if (!block) return false;
+              const checkedInput = block.querySelector('input[type="checkbox"]:checked');
+              if (checkedInput) {
+                checkedInput.click();
+                return true;
+              }
+              const checkedBox = block.querySelector('[aria-checked="true"], .checked, .byte-checkbox-checked, .byte-checkbox-wrapper-checked');
+              if (checkedBox) {
+                checkedBox.click();
+                return true;
+              }
+              const textNode = Array.from(block.querySelectorAll('label, span, div')).find((element) => {
+                const text = (element.innerText || element.textContent || '').trim();
+                return text === '生成图文' && visible(element);
+              });
+              if (textNode) {
+                textNode.click();
+                return true;
+              }
+              return false;
+            }
+            """
+        )
+        if toggled:
+            page.wait_for_timeout(1000)
+            write_log(log, "disabled video option: video_to_article")
+            return
+    except Exception as exc:
+        write_log(log, f"disable video_to_article evaluate failed: {exc}")
     locators = [
         page.locator("label").filter(has_text="生成图文").first,
         page.get_by_text("生成图文", exact=True).last,
@@ -458,11 +521,13 @@ def enable_ad_revenue(page, log) -> None:
 
 def click_publish(page, selectors: dict, log) -> None:
     locators = [
-        locator_from_selector(page, selector_value(selectors, "video_publish.publish")),
-        page.get_by_role("button", name="发布").last,
+        page.get_by_role("button", name="发布", exact=True).last,
         page.locator("button").filter(has_text="发布").last,
+        locator_from_selector(page, selector_value(selectors, "video_publish.publish")),
     ]
     if click_first_enabled(locators, log, "video publish button", timeout=8000):
+        return
+    if click_exact_visible_button(page, "发布", log, "video publish button"):
         return
     raise RuntimeError("未找到头条号视频发布按钮")
 
@@ -484,7 +549,9 @@ def wait_publish_result(page, title: str, log) -> None:
         detect_verification(page)
         text = safe_body_text(page)
         compact_text = "".join(text.split())
-        if any(pattern in text for pattern in SUCCESS_PATTERNS):
+        if "manage/draft" in (page.url or ""):
+            raise RuntimeError("视频被保存为草稿，未完成发布")
+        if any(pattern in text for pattern in SUCCESS_PATTERNS if pattern != "作品管理"):
             write_log(log, "video publish success detected")
             return
         if normalized_title and normalized_title in compact_text and "作品管理" in text:
@@ -493,11 +560,43 @@ def wait_publish_result(page, title: str, log) -> None:
         for pattern in FAILURE_PATTERNS:
             if pattern in text:
                 raise RuntimeError(f"头条号视频发布失败：{pattern}")
-        if page.url and any(part in page.url for part in ["/publish/success", "/manage", "content/manage"]):
+        if page.url and any(part in page.url for part in ["/publish/success", "content/manage"]):
             write_log(log, f"video publish success inferred by url: {page.url}")
             return
         page.wait_for_timeout(2000)
     raise RuntimeError("等待视频发布结果超时")
+
+
+def click_exact_visible_button(page, text: str, log, label: str) -> bool:
+    try:
+        clicked = page.evaluate(
+            """
+            ({ text }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const buttons = Array.from(document.querySelectorAll('button, [role="button"], .byte-btn'));
+              const button = buttons.reverse().find((element) => {
+                const content = (element.innerText || element.textContent || '').trim();
+                return content === text && visible(element) && !element.disabled;
+              });
+              if (!button) return false;
+              button.scrollIntoView({ block: 'center', inline: 'center' });
+              button.click();
+              return true;
+            }
+            """,
+            {"text": text},
+        )
+        if clicked:
+            write_log(log, f"clicked {label} by exact text: {text}")
+            page.wait_for_timeout(1500)
+            return True
+    except Exception as exc:
+        write_log(log, f"exact button click failed: {exc}")
+    return False
 
 
 def fill_first(locators, value: str, log, label: str, required: bool = True) -> bool:

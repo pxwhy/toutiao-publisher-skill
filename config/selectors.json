@@ -49,7 +49,7 @@
     "cover_next": "body > div.Dialog-container > div > div.m-content > div > div.footer.undefined > div",
     "video_to_article": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-form-bone.video-form-basic.small-video > div.video-form-wrapper > div.video-form-item.form-item-video2art > div.video-form-item-wrapper > div",
     "work_declaration": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-form-bone.video-form-basic.small-video > div.video-form-wrapper > div.video-form-item.form-item-source > div.video-form-item-wrapper > div > div > span",
-    "publish": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-batch-footer > div > button"
+    "publish": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-batch-footer > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.action-footer-btn.submit > span"
   },
   "modal": {
     "content": "body > div:nth-child(43) > div.byte-modal-wrapper.zoomModal-appear-done.zoomModal-enter-done > div > div:nth-child(2) > div.byte-modal-content",

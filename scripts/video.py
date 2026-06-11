@@ -172,12 +172,38 @@ def validate_payload(payload: dict, state_path: Path, account_paths) -> None:
 
 def build_options(payload: dict) -> dict:
     options = payload.get("options") or {}
+    source_declarations = options.get("source_declarations", options.get("source_declaration"))
+    if source_declarations is None and options.get("personal_opinion", True):
+        source_declarations = ["investment"]
+    elif source_declarations is None:
+        source_declarations = []
+    if isinstance(source_declarations, str):
+        source_declarations = [source_declarations]
     return {
         "ad_revenue": bool(options.get("ad_revenue", True)),
         "video_to_article": bool(options.get("video_to_article", False)),
-        "personal_opinion": bool(options.get("personal_opinion", True)),
+        "topics": normalize_string_list(options.get("topics", payload.get("topics", []))),
+        "source_declarations": normalize_string_list(source_declarations),
+        "external_link": bool(options.get("external_link", False)),
         "visibility": str(options.get("visibility", "public")).strip().lower(),
     }
+
+
+def normalize_string_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, list):
+        items = value
+    else:
+        raise ValueError("列表字段必须是字符串或字符串数组")
+    normalized = []
+    for item in items:
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
 
 
 def required_selector(selectors: dict, dotted_path: str) -> str:
@@ -252,6 +278,34 @@ def strict_click_if_visible(page, selectors: dict, dotted_path: str, log, label:
         return False
 
 
+def selected_state(locator) -> bool:
+    return bool(locator.evaluate(
+        """
+        (element) => {
+          const input = element.matches('input') ? element : element.querySelector('input');
+          if (input && (input.type === 'checkbox' || input.type === 'radio')) return Boolean(input.checked);
+          return Boolean(
+            element.getAttribute('aria-checked') === 'true' ||
+            element.querySelector('[aria-checked="true"], .checked, .byte-checkbox-checked, .byte-checkbox-wrapper-checked, .byte-radio-inner.checked')
+          );
+        }
+        """
+    ))
+
+
+def strict_set_checked(page, selectors: dict, dotted_path: str, enabled: bool, log, label: str, timeout: int = 3000) -> None:
+    locator = strict_locator(page, selectors, dotted_path)
+    locator.wait_for(state="visible", timeout=timeout)
+    checked = selected_state(locator)
+    if checked != enabled:
+        locator.scroll_into_view_if_needed(timeout=timeout)
+        locator.click(timeout=timeout)
+        page.wait_for_timeout(700)
+        write_log(log, f"set {label}={enabled}: {dotted_path}")
+        return
+    write_log(log, f"{label} already {enabled}: {dotted_path}")
+
+
 def open_video_publish(page, selectors: dict, log) -> None:
     page.goto(selectors.get("home_url") or TOUTIAO_HOME_URL, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(4000)
@@ -305,6 +359,19 @@ def fill_description(page, description: str, selectors: dict, log) -> None:
     strict_fill(page, selectors, "video_publish.description", description, log, "video description")
 
 
+def fill_topics(page, topics: list[str], selectors: dict, log) -> None:
+    if not topics:
+        return
+    topic_input = strict_locator(page, selectors, "video_publish.topic")
+    topic_input.wait_for(state="visible", timeout=5000)
+    for topic in topics[:10]:
+        topic_input.click(timeout=3000)
+        topic_input.fill(topic, timeout=3000)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(500)
+        write_log(log, f"filled video topic: {topic}")
+
+
 def upload_cover(page, cover_path: Path | None, selectors: dict, log) -> None:
     if not cover_path:
         write_log(log, "video cover skipped: cover_image not provided")
@@ -348,12 +415,44 @@ def dismiss_benefit_modal(page, selectors: dict, log) -> None:
 
 
 def handle_options(page, selectors: dict, options: dict, log) -> None:
+    fill_topics(page, options.get("topics", []), selectors, log)
     set_video_to_article(page, selectors, bool(options.get("video_to_article")), log)
-    if options.get("personal_opinion"):
-        strict_click(page, selectors, "video_publish.personal_opinion", log, "video personal opinion", timeout=3000)
+    set_source_declarations(page, selectors, options.get("source_declarations", []), log)
+    set_external_link(page, selectors, bool(options.get("external_link")), log)
     if options.get("ad_revenue"):
         enable_ad_revenue(page, selectors, log)
     set_visibility(page, selectors, options.get("visibility", "public"), log)
+
+
+def set_source_declarations(page, selectors: dict, declarations: list[str], log) -> None:
+    source_keys = {
+        "external": "external",
+        "outside": "external",
+        "internal": "internal",
+        "site": "internal",
+        "self": "self_shot",
+        "self_shot": "self_shot",
+        "self-shot": "self_shot",
+        "ai": "ai",
+        "fiction": "fiction",
+        "story": "fiction",
+        "investment": "investment",
+        "personal_opinion": "investment",
+        "opinion": "investment",
+        "health": "health",
+    }
+    normalized = []
+    for declaration in declarations:
+        key = source_keys.get(str(declaration).strip().lower())
+        if not key:
+            raise ValueError(f"不支持的视频作品声明：{declaration}")
+        normalized.append(key)
+    for key in normalized:
+        strict_set_checked(page, selectors, f"video_publish.source.{key}", True, log, f"video source {key}")
+
+
+def set_external_link(page, selectors: dict, enabled: bool, log) -> None:
+    strict_set_checked(page, selectors, "video_publish.external_link", enabled, log, "video external_link")
 
 
 def set_visibility(page, selectors: dict, visibility: str, log) -> None:
@@ -366,32 +465,11 @@ def set_visibility(page, selectors: dict, visibility: str, log) -> None:
         "only-me": "private",
     }
     key = visibility_keys.get(str(visibility or "public").strip().lower(), "public")
-    strict_click(page, selectors, f"video_publish.visibility.{key}", log, f"video visibility: {key}", timeout=3000)
+    strict_set_checked(page, selectors, f"video_publish.visibility.{key}", True, log, f"video visibility {key}")
 
 
 def set_video_to_article(page, selectors: dict, enabled: bool, log) -> None:
-    selector = required_selector(selectors, "video_publish.video_to_article_checkbox")
-    locator = page.locator(selector).first
-    locator.wait_for(state="visible", timeout=3000)
-    checked = locator.evaluate(
-        """
-        (element) => {
-          const explicitInput = element.matches('input') ? element : element.querySelector('input[type="checkbox"]');
-          if (explicitInput) return Boolean(explicitInput.checked);
-          return Boolean(
-            element.getAttribute('aria-checked') === 'true' ||
-            element.querySelector('[aria-checked="true"], .checked, .byte-checkbox-checked, .byte-checkbox-wrapper-checked')
-          );
-        }
-        """
-    )
-    if checked != enabled:
-        locator.scroll_into_view_if_needed(timeout=3000)
-        locator.click(timeout=3000)
-        page.wait_for_timeout(1000)
-        write_log(log, f"set video_to_article={enabled}")
-        return
-    write_log(log, f"video_to_article already {enabled}")
+    strict_set_checked(page, selectors, "video_publish.video_to_article_checkbox", enabled, log, "video_to_article")
 
 
 def enable_ad_revenue(page, selectors: dict, log) -> None:
@@ -400,7 +478,7 @@ def enable_ad_revenue(page, selectors: dict, log) -> None:
 
 
 def click_publish(page, selectors: dict, log) -> None:
-    strict_click(page, selectors, "video_publish.publish", log, "video publish button", timeout=8000)
+    strict_click(page, selectors, "video_publish.buttons.publish", log, "video publish button", timeout=8000)
 
 
 def confirm_publish_if_needed(page, selectors: dict, log) -> None:

@@ -1,6 +1,6 @@
 ---
 name: toutiao-publisher
-description: Use when a coding agent needs to log in to Toutiao Creator, save Playwright storage_state, and publish a Toutiao article with Playwright using a JSON input file, including cover upload, article filling, publish option handling, preview/confirm publish flow, diagnostics, and anti-risk boundaries. This skill must not bypass verification or publish without explicit user intent.
+description: Use when a coding agent needs to log in to Toutiao Creator, save Playwright storage_state, and publish a Toutiao article or video with Playwright using a JSON input file, including cover upload, article/video filling, publish option handling, preview/confirm publish flow, diagnostics, and anti-risk boundaries. This skill must not bypass verification or publish without explicit user intent.
 ---
 
 # Toutiao Publisher
@@ -84,6 +84,8 @@ python scripts/login.py --account default --qr --headless --qr-timeout 300
 
 ## 发布
 
+图文文章：
+
 ```bash
 python scripts/publish.py --account default --input data/inputs/article.json
 ```
@@ -95,6 +97,20 @@ python scripts/publish.py --account my-toutiao --input data/accounts/my-toutiao/
 ```
 
 发布前必须确认用户明确要求自动发布。若用户只想填充草稿，输入 JSON 使用 `"publish_mode": "draft"`。
+
+视频：
+
+```bash
+python scripts/video.py --account default --input data/accounts/default/inputs/video.json
+```
+
+调试时可有头运行：
+
+```bash
+python scripts/video.py --account default --input data/accounts/default/inputs/video.json --headed
+```
+
+视频发布会上传 `video` 文件、可选上传 `cover_image`，再处理标题、作品声明、视频生成图文和发布按钮。若用户只想填充草稿，输入 JSON 使用 `"publish_mode": "draft"`。
 
 ## 获取作品数据
 
@@ -126,7 +142,8 @@ config/selectors.json
 
 ## 输入格式
 
-见 `references/input-format.md`。
+- 图文文章见 `references/input-format.md`。
+- 视频见 `references/video-input-format.md`。
 
 ## 页面规则
 

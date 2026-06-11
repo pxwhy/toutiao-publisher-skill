@@ -8,6 +8,7 @@
 - 使用 Playwright `storage_state` 保存登录态。
 - 按结构化 `content_blocks` 排版文章正文。
 - 上传正文图片和独立封面图。
+- 上传头条号视频和视频封面图。
 - 处理“投放广告赚收益”“个人观点，仅供参考”等发布选项。
 - 发布失败时保留日志、截图和 `result.json`。
 - 支持多账号数据目录。
@@ -48,6 +49,12 @@ data/accounts/default/login/login-qr.png
 python scripts/publish.py --account default --input data/accounts/default/inputs/article.json
 ```
 
+视频发布：
+
+```bash
+python scripts/video.py --account default --input data/accounts/default/inputs/video.json
+```
+
 获取作品数据：
 
 ```bash
@@ -58,4 +65,5 @@ python scripts/works.py --account default
 
 ```text
 references/input-format.md
+references/video-input-format.md
 ```

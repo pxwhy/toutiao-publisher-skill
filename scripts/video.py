@@ -18,11 +18,8 @@ from playwright.sync_api import sync_playwright
 
 from account_paths import build_account_paths, default_read_state_path, display_path
 from publish import (
-    click_first_enabled,
-    click_selector,
     detect_verification,
     load_selectors,
-    locator_from_selector,
     read_json,
     resolve_path,
     safe_body_text,
@@ -118,7 +115,7 @@ def run_publish(args: argparse.Namespace, payload: dict, state_path: Path, run_d
             page = context.new_page()
             open_video_publish(page, selectors, log)
             upload_video(page, video_path, selectors, args.upload_timeout, log)
-            dismiss_benefit_modal(page, log)
+            dismiss_benefit_modal(page, selectors, log)
             fill_title(page, title, selectors, log)
             fill_description(page, description, selectors, log)
             upload_cover(page, cover_path, selectors, log)
@@ -183,40 +180,95 @@ def build_options(payload: dict) -> dict:
     }
 
 
+def required_selector(selectors: dict, dotted_path: str) -> str:
+    selector = selector_value(selectors, dotted_path)
+    if not selector:
+        raise RuntimeError(f"缺少 selector: {dotted_path}")
+    return selector
+
+
+def strict_locator(page, selectors: dict, dotted_path: str):
+    return page.locator(required_selector(selectors, dotted_path)).first
+
+
+def strict_click(page, selectors: dict, dotted_path: str, log, label: str, timeout: int = 8000) -> None:
+    locator = strict_locator(page, selectors, dotted_path)
+    locator.wait_for(state="visible", timeout=timeout)
+    locator.scroll_into_view_if_needed(timeout=3000)
+    locator.click(timeout=timeout)
+    write_log(log, f"clicked {label}: {dotted_path}")
+    page.wait_for_timeout(1000)
+
+
+def strict_fill(page, selectors: dict, dotted_path: str, value: str, log, label: str, timeout: int = 8000) -> None:
+    locator = strict_locator(page, selectors, dotted_path)
+    locator.wait_for(state="visible", timeout=timeout)
+    locator.scroll_into_view_if_needed(timeout=3000)
+    locator.click(timeout=3000)
+    try:
+        locator.fill(value, timeout=timeout)
+    except Exception:
+        locator.evaluate(
+            """
+            (element, value) => {
+              element.focus();
+              if ('value' in element) {
+                element.value = value;
+              } else {
+                element.textContent = value;
+              }
+              element.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                inputType: 'insertText',
+                data: value
+              }));
+              element.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            """,
+            value,
+        )
+    write_log(log, f"filled {label}: {dotted_path}")
+
+
+def strict_set_input_files(page, selectors: dict, dotted_path: str, file_path: Path, log, label: str, timeout: int = 15000) -> None:
+    locator = strict_locator(page, selectors, dotted_path)
+    locator.set_input_files(str(file_path), timeout=timeout)
+    write_log(log, f"selected {label}: {display_path(file_path)}")
+
+
+def strict_click_if_visible(page, selectors: dict, dotted_path: str, log, label: str, timeout: int = 2000) -> bool:
+    selector = selector_value(selectors, dotted_path)
+    if not selector:
+        return False
+    locator = page.locator(selector).first
+    try:
+        if not locator.is_visible(timeout=timeout):
+            return False
+        locator.click(timeout=timeout)
+        write_log(log, f"clicked {label}: {dotted_path}")
+        page.wait_for_timeout(1000)
+        return True
+    except Exception:
+        return False
+
+
 def open_video_publish(page, selectors: dict, log) -> None:
     page.goto(selectors.get("home_url") or TOUTIAO_HOME_URL, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(4000)
     detect_verification(page)
-    if click_selector(page, selector_value(selectors, "video_publish.entry"), log, "video entry", timeout=10000):
-        page.wait_for_timeout(4000)
-        detect_verification(page)
-        return
-    if click_first_enabled([
-        page.get_by_text("视频", exact=True).last,
-        page.locator("a").filter(has_text="视频").last,
-    ], log, "video entry fallback", timeout=5000):
-        page.wait_for_timeout(4000)
-        detect_verification(page)
-        return
-    raise RuntimeError("未找到头条号视频发布入口")
+    strict_click(page, selectors, "video_publish.entry", log, "video entry", timeout=10000)
+    page.wait_for_timeout(4000)
+    detect_verification(page)
 
 
 def upload_video(page, video_path: Path, selectors: dict, upload_timeout: int, log) -> None:
-    upload_selector = selector_value(selectors, "video_publish.upload_trigger")
-    if upload_selector:
-        upload_trigger = locator_from_selector(page, upload_selector)
-    else:
-        upload_trigger = page.locator(".upload-video-trigger").first
     try:
         with page.expect_file_chooser(timeout=8000) as chooser_info:
-            upload_trigger.click(timeout=8000)
+            strict_click(page, selectors, "video_publish.upload_trigger", log, "video upload trigger", timeout=8000)
         chooser_info.value.set_files(str(video_path))
         write_log(log, f"selected video by file chooser: {display_path(video_path)}")
-    except Exception as exc:
-        write_log(log, f"video file chooser failed: {exc}")
-        file_input = page.locator("input[type='file']").first
-        file_input.set_input_files(str(video_path), timeout=15000)
-        write_log(log, f"selected video by input: {display_path(video_path)}")
+    except Exception:
+        strict_set_input_files(page, selectors, "video_publish.video_file_input", video_path, log, "video by input")
     wait_video_upload_ready(page, selectors, upload_timeout, log)
 
 
@@ -244,130 +296,45 @@ def wait_video_upload_ready(page, selectors: dict, timeout_seconds: int, log) ->
 
 
 def fill_title(page, title: str, selectors: dict, log) -> None:
-    locators = [
-        locator_from_selector(page, selector_value(selectors, "video_publish.title")),
-        page.locator(".form-item-title input").first,
-        page.locator("input[maxlength='30']").first,
-        page.locator("input[placeholder*='标题']").first,
-        page.locator("input:visible").first,
-    ]
-    if fill_first(locators, title, log, "video title"):
-        return
-    raise RuntimeError("未找到视频标题输入框")
+    strict_fill(page, selectors, "video_publish.title", title, log, "video title")
 
 
 def fill_description(page, description: str, selectors: dict, log) -> None:
     if not description:
         return
-    locators = [
-        locator_from_selector(page, selector_value(selectors, "video_publish.description")),
-        page.locator("textarea[placeholder*='简介']").first,
-        page.locator("textarea[placeholder*='描述']").first,
-        page.locator("textarea").first,
-        page.locator("[contenteditable='true']").last,
-    ]
-    if fill_first(locators, description, log, "video description", required=False):
-        return
-    write_log(log, "video description skipped: field unavailable")
+    strict_fill(page, selectors, "video_publish.description", description, log, "video description")
 
 
 def upload_cover(page, cover_path: Path | None, selectors: dict, log) -> None:
     if not cover_path:
         write_log(log, "video cover skipped: cover_image not provided")
         return
-    locators = [
-        locator_from_selector(page, selector_value(selectors, "video_publish.cover")),
-        page.get_by_text("上传封面", exact=True).last,
-        page.locator(".form-item-poster").get_by_text("上传封面", exact=True).last,
-        page.locator(".form-item-poster").locator("div").filter(has_text="上传封面").last,
-        page.locator(".form-item-poster").first,
-    ]
-    for locator in locators:
-        if locator is None:
-            continue
-        try:
-            locator.wait_for(state="visible", timeout=3000)
-            locator.scroll_into_view_if_needed(timeout=3000)
-            with page.expect_file_chooser(timeout=6000) as chooser_info:
-                locator.click(timeout=5000)
-            chooser_info.value.set_files(str(cover_path))
-            page.wait_for_timeout(3000)
-            finish_video_cover_dialog(page, selectors, log)
-            write_log(log, f"uploaded video cover by file chooser: {display_path(cover_path)}")
-            return
-        except Exception as exc:
-            write_log(log, f"video cover chooser candidate failed: {exc}")
-            try:
-                locator.click(timeout=2000)
-                page.wait_for_timeout(1000)
-                if set_cover_file_input(page, cover_path, selectors, log):
-                    return
-            except Exception:
-                continue
-    if set_cover_file_input(page, cover_path, selectors, log):
-        return
-    raise RuntimeError("视频封面上传失败")
-
-
-def set_cover_file_input(page, cover_path: Path, selectors: dict, log) -> bool:
-    click_cover_local_upload(page, selectors, log)
-    inputs = [
-        page.locator(".Dialog-container input[type='file'][accept*='image']").first,
-        page.locator(".Dialog-container input[type='file']").first,
-        page.locator(".form-item-poster input[type='file']").first,
-        page.locator("input[type='file'][accept*='image']").first,
-    ]
-    for file_input in inputs:
-        try:
-            file_input.set_input_files(str(cover_path), timeout=8000)
-            page.wait_for_timeout(3000)
-            finish_video_cover_dialog(page, selectors, log)
-            write_log(log, f"uploaded video cover by input: {display_path(cover_path)}")
-            return True
-        except Exception as exc:
-            write_log(log, f"video cover input candidate failed: {exc}")
-    return False
-
-
-def click_cover_local_upload(page, selectors: dict, log) -> None:
-    locators = [
-        page.locator(".Dialog-container").get_by_text("本地上传", exact=True).last,
-        page.locator(".Dialog-container li").filter(has_text="本地上传").last,
-        locator_from_selector(page, selector_value(selectors, "video_publish.cover_local_upload")),
-    ]
-    click_first_enabled(locators, log, "video cover local upload", timeout=2000)
+    strict_click(page, selectors, "video_publish.cover_trigger", log, "video cover trigger", timeout=8000)
+    strict_click(page, selectors, "video_publish.cover_local_upload", log, "video cover local upload", timeout=8000)
+    strict_set_input_files(page, selectors, "video_publish.cover_file_input", cover_path, log, "video cover", timeout=8000)
+    page.wait_for_timeout(3000)
+    finish_video_cover_dialog(page, selectors, log)
+    write_log(log, f"uploaded video cover by configured selectors: {display_path(cover_path)}")
 
 
 def finish_video_cover_dialog(page, selectors: dict, log) -> None:
-    dialog = page.locator(".Dialog-container, .byte-modal-wrapper, .byte-drawer-wrapper").filter(has_text="封面").last
-    try:
-        if not dialog.is_visible(timeout=2000):
-            return
-    except Exception:
-        return
-    texts = ["下一步", "确定", "完成", "保存"]
     for _ in range(4):
+        dialog = page.locator(".Dialog-container").last
         try:
             if not dialog.is_visible(timeout=1000):
                 return
         except Exception:
             return
-        locators = []
-        next_selector = selector_value(selectors, "video_publish.cover_next")
-        if next_selector:
-            locators.append(locator_from_selector(page, next_selector))
-        for text in texts:
-            locators.extend([
-                dialog.get_by_text(text, exact=True).last,
-                dialog.locator("button").filter(has_text=text).last,
-                page.get_by_text(text, exact=True).last,
-            ])
-        if click_first_enabled(locators, log, "video cover dialog confirm", timeout=3000):
-            page.wait_for_timeout(2000)
-            continue
-        break
+        clicked = (
+            strict_click_if_visible(page, selectors, "video_publish.cover_finish_confirm", log, "video cover finish confirm", timeout=1000)
+            or strict_click_if_visible(page, selectors, "video_publish.cover_next", log, "video cover dialog next", timeout=1000)
+            or strict_click_if_visible(page, selectors, "video_publish.cover_editor_confirm", log, "video cover editor confirm", timeout=1000)
+        )
+        if not clicked:
+            break
+        page.wait_for_timeout(1500)
     try:
-        if dialog.is_visible(timeout=1000):
+        if page.locator(".Dialog-container").last.is_visible(timeout=1000):
             raise RuntimeError("视频封面弹窗未关闭")
     except RuntimeError:
         raise
@@ -375,171 +342,69 @@ def finish_video_cover_dialog(page, selectors: dict, log) -> None:
         return
 
 
-def dismiss_benefit_modal(page, log) -> None:
-    modal = page.locator(".byte-modal-wrapper, .byte-modal").filter(has_text="小视频创作权益").last
-    try:
-        if not modal.is_visible(timeout=2000):
-            return
-    except Exception:
-        return
-    locators = [
-        modal.get_by_text("暂不开通", exact=True).last,
-        modal.locator("button").filter(has_text="暂不开通").last,
-        modal.locator(".byte-modal-close").last,
-        page.get_by_text("暂不开通", exact=True).last,
-    ]
-    if click_first_enabled(locators, log, "video benefit modal dismiss", timeout=3000):
-        page.wait_for_timeout(1000)
-        return
-    try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(1000)
-        write_log(log, "dismissed video benefit modal with Escape")
-    except Exception:
-        write_log(log, "video benefit modal dismiss failed")
+def dismiss_benefit_modal(page, selectors: dict, log) -> None:
+    if not strict_click_if_visible(page, selectors, "video_publish.benefit_modal_dismiss", log, "video benefit modal dismiss"):
+        write_log(log, "video benefit modal not visible")
 
 
 def handle_options(page, selectors: dict, options: dict, log) -> None:
-    if options.get("video_to_article"):
-        click_selector(page, selector_value(selectors, "video_publish.video_to_article"), log, "视频生成图文", timeout=3000)
-    else:
-        disable_video_to_article(page, selectors, log)
+    set_video_to_article(page, selectors, bool(options.get("video_to_article")), log)
     if options.get("personal_opinion"):
-        if click_selector(page, selector_value(selectors, "video_publish.work_declaration"), log, "作品声明", timeout=3000):
-            page.wait_for_timeout(1000)
-            click_personal_opinion(page, log)
+        strict_click(page, selectors, "video_publish.personal_opinion", log, "video personal opinion", timeout=3000)
     if options.get("ad_revenue"):
-        enable_ad_revenue(page, log)
-    set_visibility(page, options.get("visibility", "public"), log)
+        enable_ad_revenue(page, selectors, log)
+    set_visibility(page, selectors, options.get("visibility", "public"), log)
 
 
-def set_visibility(page, visibility: str, log) -> None:
-    visibility_labels = {
-        "public": "公开",
-        "fans": "粉丝可见",
-        "followers": "粉丝可见",
-        "private": "仅我可见",
-        "only_me": "仅我可见",
-        "only-me": "仅我可见",
+def set_visibility(page, selectors: dict, visibility: str, log) -> None:
+    visibility_keys = {
+        "public": "public",
+        "fans": "fans",
+        "followers": "fans",
+        "private": "private",
+        "only_me": "private",
+        "only-me": "private",
     }
-    label_text = visibility_labels.get(str(visibility or "public").strip().lower(), "公开")
-    locators = [
-        page.locator("label").filter(has_text=label_text).last,
-        page.get_by_text(label_text, exact=True).last,
-        page.locator(".video-form-item, .form-item").filter(has_text="谁可以看").locator("label").filter(has_text=label_text).last,
-    ]
-    if click_first_enabled(locators, log, f"video visibility: {label_text}", timeout=3000):
+    key = visibility_keys.get(str(visibility or "public").strip().lower(), "public")
+    strict_click(page, selectors, f"video_publish.visibility.{key}", log, f"video visibility: {key}", timeout=3000)
+
+
+def set_video_to_article(page, selectors: dict, enabled: bool, log) -> None:
+    selector = required_selector(selectors, "video_publish.video_to_article_checkbox")
+    locator = page.locator(selector).first
+    locator.wait_for(state="visible", timeout=3000)
+    checked = locator.evaluate(
+        """
+        (element) => {
+          const explicitInput = element.matches('input') ? element : element.querySelector('input[type="checkbox"]');
+          if (explicitInput) return Boolean(explicitInput.checked);
+          return Boolean(
+            element.getAttribute('aria-checked') === 'true' ||
+            element.querySelector('[aria-checked="true"], .checked, .byte-checkbox-checked, .byte-checkbox-wrapper-checked')
+          );
+        }
+        """
+    )
+    if checked != enabled:
+        locator.scroll_into_view_if_needed(timeout=3000)
+        locator.click(timeout=3000)
+        page.wait_for_timeout(1000)
+        write_log(log, f"set video_to_article={enabled}")
         return
-    write_log(log, f"video visibility unavailable: {label_text}")
+    write_log(log, f"video_to_article already {enabled}")
 
 
-def disable_video_to_article(page, selectors: dict, log) -> None:
-    try:
-        toggled = page.evaluate(
-            """
-            () => {
-              const visible = (element) => {
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-              };
-              const blocks = Array.from(document.querySelectorAll('div, section, label'))
-                .filter((element) => visible(element) && (element.innerText || element.textContent || '').includes('视频生成图文'));
-              const block = blocks.sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width)[0];
-              if (!block) return false;
-              const checkedInput = block.querySelector('input[type="checkbox"]:checked');
-              if (checkedInput) {
-                checkedInput.click();
-                return true;
-              }
-              const checkedBox = block.querySelector('[aria-checked="true"], .checked, .byte-checkbox-checked, .byte-checkbox-wrapper-checked');
-              if (checkedBox) {
-                checkedBox.click();
-                return true;
-              }
-              const textNode = Array.from(block.querySelectorAll('label, span, div')).find((element) => {
-                const text = (element.innerText || element.textContent || '').trim();
-                return text === '生成图文' && visible(element);
-              });
-              if (textNode) {
-                textNode.click();
-                return true;
-              }
-              return false;
-            }
-            """
-        )
-        if toggled:
-            page.wait_for_timeout(1000)
-            write_log(log, "disabled video option: video_to_article")
-            return
-    except Exception as exc:
-        write_log(log, f"disable video_to_article evaluate failed: {exc}")
-    locators = [
-        page.locator("label").filter(has_text="生成图文").first,
-        page.get_by_text("生成图文", exact=True).last,
-        page.locator(".form-item-video2art").get_by_text("生成图文", exact=True).last,
-        locator_from_selector(page, selector_value(selectors, "video_publish.video_to_article")),
-    ]
-    for locator in locators:
-        if locator is None:
-            continue
-        try:
-            locator.scroll_into_view_if_needed(timeout=3000)
-            locator.click(timeout=3000)
-            page.wait_for_timeout(1000)
-            write_log(log, "disabled video option: video_to_article")
-            return
-        except Exception as exc:
-            write_log(log, f"disable video_to_article candidate failed: {exc}")
-    write_log(log, "skip video option: video_to_article")
-
-
-def click_personal_opinion(page, log) -> None:
-    locators = [
-        page.get_by_text("个人观点，仅供参考", exact=True).last,
-        page.locator("label").filter(has_text="个人观点").last,
-    ]
-    click_first_enabled(locators, log, "video personal opinion", timeout=3000)
-
-
-def enable_ad_revenue(page, log) -> None:
-    blocks = page.locator(".video-form-item, .form-item, .edit-input").filter(has_text="投放广告")
-    for index in range(min(blocks.count(), 5)):
-        block = blocks.nth(index)
-        try:
-            block.scroll_into_view_if_needed(timeout=2000)
-            radio = block.locator("label").filter(has_text="投放广告").first
-            if radio.count() > 0:
-                radio.click(timeout=3000)
-                write_log(log, "selected video option: 投放广告赚收益")
-                return
-        except Exception:
-            continue
-    write_log(log, "video ad revenue option unavailable")
+def enable_ad_revenue(page, selectors: dict, log) -> None:
+    if not strict_click_if_visible(page, selectors, "video_publish.ad_revenue", log, "video ad revenue", timeout=3000):
+        write_log(log, "video ad revenue selector not configured or not visible")
 
 
 def click_publish(page, selectors: dict, log) -> None:
-    locators = [
-        page.get_by_role("button", name="发布", exact=True).last,
-        page.locator("button").filter(has_text="发布").last,
-        locator_from_selector(page, selector_value(selectors, "video_publish.publish")),
-    ]
-    if click_first_enabled(locators, log, "video publish button", timeout=8000):
-        return
-    if click_exact_visible_button(page, "发布", log, "video publish button"):
-        return
-    raise RuntimeError("未找到头条号视频发布按钮")
+    strict_click(page, selectors, "video_publish.publish", log, "video publish button", timeout=8000)
 
 
 def confirm_publish_if_needed(page, selectors: dict, log) -> None:
-    locators = [
-        locator_from_selector(page, selector_value(selectors, "modal.confirm")),
-        page.locator(".byte-modal-wrapper .byte-modal-footer button.byte-btn-primary").last,
-        page.get_by_text("确认发布", exact=True).last,
-        page.get_by_text("确定", exact=True).last,
-    ]
-    click_first_enabled(locators, log, "video confirm button", timeout=5000)
+    strict_click_if_visible(page, selectors, "modal.confirm", log, "video confirm button", timeout=5000)
 
 
 def wait_publish_result(page, title: str, log) -> None:
@@ -565,79 +430,6 @@ def wait_publish_result(page, title: str, log) -> None:
             return
         page.wait_for_timeout(2000)
     raise RuntimeError("等待视频发布结果超时")
-
-
-def click_exact_visible_button(page, text: str, log, label: str) -> bool:
-    try:
-        clicked = page.evaluate(
-            """
-            ({ text }) => {
-              const visible = (element) => {
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-              };
-              const buttons = Array.from(document.querySelectorAll('button, [role="button"], .byte-btn'));
-              const button = buttons.reverse().find((element) => {
-                const content = (element.innerText || element.textContent || '').trim();
-                return content === text && visible(element) && !element.disabled;
-              });
-              if (!button) return false;
-              button.scrollIntoView({ block: 'center', inline: 'center' });
-              button.click();
-              return true;
-            }
-            """,
-            {"text": text},
-        )
-        if clicked:
-            write_log(log, f"clicked {label} by exact text: {text}")
-            page.wait_for_timeout(1500)
-            return True
-    except Exception as exc:
-        write_log(log, f"exact button click failed: {exc}")
-    return False
-
-
-def fill_first(locators, value: str, log, label: str, required: bool = True) -> bool:
-    for locator in locators:
-        if locator is None:
-            continue
-        try:
-            locator.wait_for(state="visible", timeout=5000)
-            locator.scroll_into_view_if_needed(timeout=3000)
-            locator.click(timeout=3000)
-            try:
-                locator.fill(value, timeout=8000)
-            except Exception:
-                locator.evaluate(
-                    """
-                    (element, value) => {
-                      element.focus();
-                      if ('value' in element) {
-                        element.value = value;
-                      } else {
-                        element.textContent = value;
-                      }
-                      element.dispatchEvent(new InputEvent('input', {
-                        bubbles: true,
-                        inputType: 'insertText',
-                        data: value
-                      }));
-                      element.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                    """,
-                    value,
-                )
-            write_log(log, f"filled {label}")
-            return True
-        except Exception as exc:
-            write_log(log, f"fill {label} candidate failed: {exc}")
-            continue
-    if required:
-        write_log(log, f"fill {label} failed")
-    return False
-
 
 if __name__ == "__main__":
     main()

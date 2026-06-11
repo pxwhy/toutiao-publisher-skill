@@ -43,13 +43,27 @@
   "video_publish": {
     "entry": "#masterRoot > div > div.pgc-content > section > aside > div > div > div > div.byte-menu-inline.base_creation_tab > div.byte-menu-inline-content > div:nth-child(2) > span > a",
     "upload_trigger": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.upload-video-trigger > div > div > div > div > div > div",
-    "title": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-form-bone.video-form-basic.small-video > div.video-form-wrapper > div.video-form-item.form-item-title > div.video-form-item-wrapper > div > div > div > input",
+    "video_file_input": "input[type='file'][accept*='video']",
+    "title": ".form-item-title input[placeholder='请输入 1～30 个字符']",
+    "description": ".form-item-abstract textarea[placeholder='请输入视频简介']",
     "cover": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-form-bone.video-form-basic.small-video > div.video-form-wrapper > div.video-form-item.form-item-poster > div.video-form-item-wrapper > div.video-form-item-control > div > div > div",
-    "cover_local_upload": "body > div.Dialog-container > div > div.m-content > div > div.body.undefined > ul > li.selected",
+    "cover_trigger": ".form-item-poster .trigger-tip",
+    "cover_file_input": ".Dialog-container .xigua-upload-poster-trigger input[type='file']",
+    "cover_local_upload": "body > div.Dialog-container > div > div.m-content > div > div.body.undefined > ul > li:nth-child(2)",
     "cover_next": "body > div.Dialog-container > div > div.m-content > div > div.footer.undefined > div",
+    "cover_editor_confirm": ".xigua-image-editor-core .footer-btns button.btn-sure",
+    "cover_finish_confirm": ".m-dialog-edit .footer button.m-button.red",
     "video_to_article": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-form-bone.video-form-basic.small-video > div.video-form-wrapper > div.video-form-item.form-item-video2art > div.video-form-item-wrapper > div",
+    "video_to_article_checkbox": ".form-item-video2art label.byte-checkbox",
     "work_declaration": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-form-bone.video-form-basic.small-video > div.video-form-wrapper > div.video-form-item.form-item-source > div.video-form-item-wrapper > div > div > span",
-    "publish": "#root > div > div > div.byte-tabs-content.byte-tabs-content-horizontal > div > div.byte-tabs-content-item.byte-tabs-content-item-active > div > div > div > div.video-list-content > div > div.video-from-container > div.video-batch-footer > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.action-footer-btn.submit > span"
+    "personal_opinion": ".form-item-source label:has-text('投资观点，仅供参考')",
+    "benefit_modal_dismiss": "text=暂不开通",
+    "publish": "button.action-footer-btn.submit",
+    "visibility": {
+      "public": ".form-item-privacy label:has-text('公开')",
+      "fans": ".form-item-privacy label:has-text('粉丝可见')",
+      "private": ".form-item-privacy label:has-text('仅我可见')"
+    }
   },
   "modal": {
     "content": "body > div:nth-child(43) > div.byte-modal-wrapper.zoomModal-appear-done.zoomModal-enter-done > div > div:nth-child(2) > div.byte-modal-content",

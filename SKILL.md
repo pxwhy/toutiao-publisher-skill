@@ -110,7 +110,7 @@ python scripts/video.py --account default --input data/accounts/default/inputs/v
 python scripts/video.py --account default --input data/accounts/default/inputs/video.json --headed
 ```
 
-视频发布会上传 `video` 文件、可选上传 `cover_image`，再处理标题、作品声明、视频生成图文和发布按钮。若用户只想填充草稿，输入 JSON 使用 `"publish_mode": "draft"`。
+视频发布会上传 `video` 文件、可选上传 `cover_image`，再处理标题、作品声明、视频生成图文、可见范围和发布按钮。若用户只想填充草稿，输入 JSON 使用 `"publish_mode": "draft"`。
 
 ## 获取作品数据
 
@@ -138,7 +138,7 @@ python scripts/works.py --account my-toutiao --max-items 200 --sync-content-coun
 config/selectors.json
 ```
 
-如果平台页面结构变化，优先更新这个配置文件。脚本会先使用配置中的 selector，失败后再使用文本和通用定位兜底。
+如果平台页面结构变化，优先更新这个配置文件。视频发布动作采用严格 selector 模式：入口、上传、标题、封面、作品声明、可见范围和发布按钮只使用配置中的 selector，不做通用文本兜底，避免误点“存草稿”等相邻按钮。
 
 ## 输入格式
 

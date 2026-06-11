@@ -27,7 +27,7 @@
 - `publish_mode`：可选，`auto` 或 `draft`，默认为 `auto`。
 - `options.ad_revenue`：可选，默认 `true`，尽量选择“投放广告赚收益”。
 - `options.video_to_article`：可选，默认 `false`，不默认开启“视频生成图文”。
-- `options.personal_opinion`：可选，默认 `true`，尽量选择“个人观点，仅供参考”。
+- `options.personal_opinion`：可选，默认 `true`，当前 selector 会选择“投资观点，仅供参考”。
 - `options.visibility`：可选，默认 `public`。支持 `public`、`fans`、`private`，其中 `private` 会选择“仅我可见”。
 
 路径规则：

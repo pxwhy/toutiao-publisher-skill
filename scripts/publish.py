@@ -3,7 +3,7 @@
 实现逻辑：
 1. 以当前脚本所在 Skill 目录为根目录，默认读取 skill_root/data/states/toutiao.json 并写入 skill_root/data/runs。
 2. 读取用户发布 JSON 和 config/selectors.json，按 content_blocks 顺序填充正文段落、小标题和图片，并单独上传封面图。
-3. 自动发布时处理“预览并发布”“确认发布”“作品同步授权”等正常平台链路，selector 失效时使用文本兜底，遇到验证码、风控或失败提示立即退出并保留诊断。
+3. 自动发布时处理“预览并发布”“确认发布”“作品同步授权”等正常平台链路；文章发布选项按稳定 selector 和当前状态设置，遇到验证码、风控或失败提示立即退出并保留诊断。
 """
 
 from __future__ import annotations
@@ -111,8 +111,9 @@ def run_publish(args: argparse.Namespace, payload: dict, state_path: Path, run_d
             detect_verification(page)
             fill_title(page, title, selectors)
             fill_content_blocks(page, content_blocks, selectors, log)
-            handle_cover(page, cover_image_paths, selectors, log)
+            handle_cover(page, cover_image_paths, selectors, log, publish_options.get("cover_mode", ""))
             upload_cover_image(page, cover_image_paths, selectors, log)
+            handle_publish_options(page, selectors, publish_options, log)
             take_screenshot(page, run_dir / "before_publish.png")
 
             published = False
@@ -155,12 +156,37 @@ def validate_payload(payload: dict, state_path: Path) -> None:
 
 def build_publish_options(payload: dict) -> dict:
     options = payload.get("options") or {}
+    source_declarations = options.get("source_declarations", options.get("source_declaration"))
+    if source_declarations is None and options.get("personal_opinion", True):
+        source_declarations = ["personal_opinion"]
+    elif source_declarations is None:
+        source_declarations = []
+    if isinstance(source_declarations, str):
+        source_declarations = [source_declarations]
     return {
         "ad_revenue": bool(options.get("ad_revenue", True)),
         "first_publish": bool(options.get("first_publish", False)),
-        "personal_opinion": bool(options.get("personal_opinion", True)),
+        "source_declarations": normalize_string_list(source_declarations),
         "sync_weitoutiao": bool(options.get("sync_weitoutiao", False)),
+        "cover_mode": str(options.get("cover_mode", "")).strip().lower(),
     }
+
+
+def normalize_string_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, list):
+        items = value
+    else:
+        raise ValueError("列表字段必须是字符串或字符串数组")
+    normalized = []
+    for item in items:
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
 
 
 def cover_image_values(payload: dict) -> list[str]:
@@ -265,6 +291,7 @@ def fill_content_blocks(page, blocks: list[dict], selectors: dict, log) -> None:
 
 
 def insert_editor_text(page, editor, text: str) -> None:
+    dismiss_editor_overlay(page)
     editor.click(timeout=3000)
     page.keyboard.press("End")
     try:
@@ -303,12 +330,52 @@ def fill_first_match(page, selectors: list[str], value: str, error_message: str)
     raise RuntimeError(error_message)
 
 
-def handle_cover(page, image_paths: list[Path], selectors: dict, log) -> None:
-    cover_mode = "single" if image_paths else "none"
-    selector = selector_value(selectors, f"article_publish.cover.{cover_mode}")
-    if click_selector(page, selector, log, f"cover mode: {cover_mode}", timeout=5000):
+def selected_state(locator) -> bool:
+    return bool(locator.evaluate(
+        """
+        (element) => {
+          const root = element.closest('label') || element;
+          const input = root.matches('input') ? root : root.querySelector('input');
+          if (input && (input.type === 'checkbox' || input.type === 'radio')) return Boolean(input.checked);
+          return Boolean(
+            root.getAttribute('aria-checked') === 'true' ||
+            root.querySelector('[aria-checked="true"], .checked, .byte-checkbox-checked, .byte-checkbox-wrapper-checked, .byte-radio-inner.checked')
+          );
+        }
+        """
+    ))
+
+
+def set_checked_selector(page, selector: str, enabled: bool, log, label: str, timeout: int = 5000) -> None:
+    if not selector:
+        raise RuntimeError(f"缺少 selector: {label}")
+    locator = page.locator(selector).first
+    locator.wait_for(state="visible", timeout=timeout)
+    checked = selected_state(locator)
+    try:
+        is_enabled = locator.is_enabled(timeout=1000)
+    except Exception:
+        is_enabled = True
+    if checked != enabled:
+        if not is_enabled:
+            if not enabled:
+                write_log(log, f"skip disabled {label}: current={checked}, target={enabled}")
+                return
+            raise RuntimeError(f"{label} 被平台禁用，无法设置为 {enabled}")
+        locator.scroll_into_view_if_needed(timeout=3000)
+        locator.click(timeout=timeout)
+        page.wait_for_timeout(700)
+        write_log(log, f"set {label}={enabled}")
         return
-    write_log(log, f"cover mode selector unavailable: {cover_mode}")
+    write_log(log, f"{label} already {enabled}")
+
+
+def handle_cover(page, image_paths: list[Path], selectors: dict, log, cover_mode: str = "") -> None:
+    normalized_mode = cover_mode if cover_mode in {"single", "triple", "none"} else ""
+    if not normalized_mode:
+        normalized_mode = "single" if image_paths else "none"
+    selector = selector_value(selectors, f"article_publish.cover.{normalized_mode}")
+    set_checked_selector(page, selector, True, log, f"cover mode {normalized_mode}")
 
 
 def insert_single_content_image(page, image_path: Path, log) -> None:
@@ -321,8 +388,10 @@ def insert_single_content_image(page, image_path: Path, log) -> None:
     try:
         page.locator(".syl-toolbar-tool.image.static").first.click(timeout=8000)
         upload_images_from_open_dialog(page, [image_path], log, "content image")
+        close_drawer_if_visible(page, log)
         write_log(log, f"inserted content image: {display_path(image_path)}")
     except Exception as exc:
+        close_drawer_if_visible(page, log)
         write_log(log, f"toutiao content image upload skipped/failed: {exc}")
 
 
@@ -407,16 +476,100 @@ def close_drawer_if_visible(page, log) -> None:
         return
     locators = [
         drawer.locator(".byte-drawer-close").last,
+        drawer.locator(".byte-icon-close").last,
+        drawer.locator("[class*='close']").last,
         drawer.get_by_text("×", exact=True).last,
     ]
     if click_first_enabled(locators, log, "drawer close", timeout=1500):
+        wait_drawer_closed(page, log)
+        return
+    if click_drawer_close_by_dom(page, log):
+        wait_drawer_closed(page, log)
         return
     try:
         page.keyboard.press("Escape")
-        page.wait_for_timeout(1000)
+        wait_drawer_closed(page, log)
         write_log(log, "closed drawer with Escape")
     except Exception:
         pass
+
+
+def dismiss_editor_overlay(page) -> None:
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+    except Exception:
+        pass
+    try:
+        clicked = page.evaluate(
+            """
+            () => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+              };
+              const drawers = Array.from(document.querySelectorAll('.byte-drawer-wrapper')).filter(visible);
+              const drawer = drawers[drawers.length - 1];
+              if (!drawer) return false;
+              const drawerRect = drawer.getBoundingClientRect();
+              const nodes = Array.from(drawer.querySelectorAll('button, [role="button"], span, div, i, svg'));
+              const closeNode = nodes.find((node) => {
+                if (!visible(node)) return false;
+                const rect = node.getBoundingClientRect();
+                return rect.left >= drawerRect.right - 90 && rect.top <= drawerRect.top + 90;
+              });
+              if (!closeNode) return false;
+              closeNode.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+              return true;
+            }
+            """
+        )
+        if clicked:
+            page.wait_for_timeout(700)
+    except Exception:
+        pass
+
+
+def click_drawer_close_by_dom(page, log) -> bool:
+    try:
+        clicked = page.evaluate(
+            """
+            () => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+              };
+              const drawers = Array.from(document.querySelectorAll('.byte-drawer-wrapper')).filter(visible);
+              const drawer = drawers[drawers.length - 1];
+              if (!drawer) return false;
+              const candidates = Array.from(drawer.querySelectorAll('button, [role="button"], .byte-icon-close, [class*="close"], span, div'));
+              const close = candidates.find((node) => {
+                const text = (node.innerText || node.textContent || '').trim();
+                const name = node.getAttribute('aria-label') || node.getAttribute('title') || '';
+                const cls = node.className ? String(node.className) : '';
+                return visible(node) && (text === '×' || name.includes('关闭') || name.toLowerCase().includes('close') || cls.includes('close'));
+              });
+              if (!close) return false;
+              close.click();
+              return true;
+            }
+            """
+        )
+        if clicked:
+            write_log(log, "closed drawer by dom")
+            return True
+    except Exception as exc:
+        write_log(log, f"drawer dom close failed: {exc}")
+    return False
+
+
+def wait_drawer_closed(page, log) -> None:
+    try:
+        page.locator(".byte-drawer-wrapper").last.wait_for(state="hidden", timeout=3000)
+    except Exception:
+        page.wait_for_timeout(1000)
 
 
 def upload_images_from_open_dialog(page, image_paths: list[Path], log, label: str) -> None:
@@ -435,7 +588,6 @@ def upload_images_from_open_dialog(page, image_paths: list[Path], log, label: st
 
 
 def publish_to_toutiao(page, run_dir: Path, title: str, selectors: dict, publish_options: dict, log) -> None:
-    handle_publish_options(page, selectors, publish_options, log)
     print_publish_button_debug(page, log)
     click_publish_button(page, selectors, log)
     page.wait_for_timeout(2500)
@@ -456,76 +608,44 @@ def publish_to_toutiao(page, run_dir: Path, title: str, selectors: dict, publish
 
 def handle_publish_options(page, selectors: dict, publish_options: dict, log) -> None:
     page.wait_for_timeout(1000)
-    option_handlers = [
-        ("ad_revenue", enable_ad_revenue_option),
-        ("first_publish", enable_toutiao_first_option),
-        ("personal_opinion", enable_personal_opinion_option),
-        ("sync_weitoutiao", enable_sync_weitoutiao_option),
-    ]
-    for option_key, handler in option_handlers:
-        if not publish_options.get(option_key):
-            write_log(log, f"skip toutiao option: {option_key}")
-            continue
-        try:
-            handler(page, selectors, log)
-        except Exception as exc:
-            write_log(log, f"toutiao option handler failed: {handler.__name__}: {exc}")
+    set_ad_revenue_option(page, selectors, bool(publish_options.get("ad_revenue")), log)
+    set_toutiao_first_option(page, selectors, bool(publish_options.get("first_publish")), log)
+    set_sync_weitoutiao_option(page, selectors, bool(publish_options.get("sync_weitoutiao")), log)
+    set_source_declarations(page, selectors, publish_options.get("source_declarations", []), log)
 
 
-def enable_ad_revenue_option(page, selectors: dict, log) -> None:
-    if click_selector(page, selector_value(selectors, "article_publish.ad.enable_revenue"), log, "投放广告赚收益", timeout=5000):
-        return
-    blocks = page.locator(".edit-input").filter(has_text="投放广告赚收益")
-    for index in range(min(blocks.count(), 3)):
-        block = blocks.nth(index)
-        text = block.inner_text(timeout=1000)
-        if "投放广告赚收益" not in text:
-            continue
-        radios = block.locator(".byte-radio-inner")
-        if radios.count() > 0:
-            radios.first.click(timeout=3000)
-            write_log(log, "selected toutiao option: 投放广告赚收益")
-            return
+def set_ad_revenue_option(page, selectors: dict, enabled: bool, log) -> None:
+    path = "article_publish.ad.enable_revenue" if enabled else "article_publish.ad.disable"
+    set_checked_selector(page, selector_value(selectors, path), True, log, f"article ad_revenue {enabled}")
 
 
-def enable_toutiao_first_option(page, selectors: dict, log) -> None:
-    if click_selector(page, selector_value(selectors, "article_publish.first_publish"), log, "头条首发", timeout=5000):
-        return
-    blocks = page.locator(".edit-input").filter(has_text="头条首发")
-    for index in range(min(blocks.count(), 3)):
-        block = blocks.nth(index)
-        block.scroll_into_view_if_needed(timeout=3000)
-        checkbox = block.locator(".byte-checkbox-wrapper").first
-        if checkbox.count() > 0:
-            checkbox.click(timeout=3000)
-            write_log(log, "selected toutiao option: 头条首发")
-            return
+def set_toutiao_first_option(page, selectors: dict, enabled: bool, log) -> None:
+    set_checked_selector(page, selector_value(selectors, "article_publish.first_publish"), enabled, log, "article first_publish")
 
 
-def enable_sync_weitoutiao_option(page, selectors: dict, log) -> None:
-    if click_selector(page, selector_value(selectors, "article_publish.sync_weitoutiao"), log, "同时发布微头条", timeout=5000):
-        return
+def set_sync_weitoutiao_option(page, selectors: dict, enabled: bool, log) -> None:
+    set_checked_selector(page, selector_value(selectors, "article_publish.sync_weitoutiao"), enabled, log, "article sync_weitoutiao")
 
 
-def enable_personal_opinion_option(page, selectors: dict, log) -> None:
-    work_declaration = selector_value(selectors, "article_publish.work_declaration")
-    if work_declaration:
-        click_selector(page, work_declaration, log, "作品声明容器", timeout=3000)
-    blocks = page.locator(".edit-input").filter(has_text="个人观点")
-    for index in range(min(blocks.count(), 3)):
-        block = blocks.nth(index)
-        block.scroll_into_view_if_needed(timeout=3000)
-        labels = block.locator("label").filter(has_text="个人观点，仅供参考")
-        for label_index in range(min(labels.count(), 5)):
-            label = labels.nth(label_index)
-            class_name = label.get_attribute("class", timeout=1000) or ""
-            if "checked" in class_name:
-                return
-            wrapper = label.locator(".byte-checkbox-wrapper").first
-            if wrapper.count() > 0:
-                wrapper.click(timeout=3000)
-                write_log(log, "selected toutiao option: 个人观点，仅供参考")
-                return
+def set_source_declarations(page, selectors: dict, declarations: list[str], log) -> None:
+    source_keys = {
+        "network": "network",
+        "external": "network",
+        "internal": "internal",
+        "site": "internal",
+        "personal_opinion": "personal_opinion",
+        "opinion": "personal_opinion",
+        "ai": "ai",
+        "fiction": "fiction",
+        "story": "fiction",
+        "investment": "investment",
+        "health": "health",
+    }
+    for declaration in declarations:
+        key = source_keys.get(str(declaration).strip().lower())
+        if not key:
+            raise ValueError(f"不支持的文章作品声明：{declaration}")
+        set_checked_selector(page, selector_value(selectors, f"article_publish.source.{key}"), True, log, f"article source {key}")
 
 
 def click_publish_button(page, selectors: dict, log) -> None:

@@ -28,8 +28,9 @@
   "publish_mode": "auto",
   "options": {
     "ad_revenue": true,
+    "cover_mode": "single",
     "first_publish": false,
-    "personal_opinion": true,
+    "source_declaration": "personal_opinion",
     "sync_weitoutiao": false
   }
 }
@@ -47,8 +48,11 @@
 - `image.caption`：可选，图片说明，会插入到图片下方。
 - `publish_mode`：可选，`auto` 或 `draft`，默认为 `auto`。
 - `options.ad_revenue`：可选，默认 `true`，选择“投放广告赚收益”。
+- `options.cover_mode`：可选，封面模式，支持 `single`、`triple`、`none`；不填时有封面图默认 `single`。
 - `options.first_publish`：可选，默认 `false`，不默认声明首发，避免触发作品同步授权弹窗。
-- `options.personal_opinion`：可选，默认 `true`，选择“个人观点，仅供参考”。
+- `options.source_declaration`：可选，作品声明，支持 `network`、`internal`、`personal_opinion`、`ai`、`fiction`、`investment`、`health`。
+- `options.source_declarations`：可选，作品声明数组；如果同时提供，优先使用数组。
+- `options.personal_opinion`：兼容旧字段；未提供 `source_declaration/source_declarations` 且该值为 `true` 时，会选择 `personal_opinion`。
 - `options.sync_weitoutiao`：可选，默认 `false`，不默认同步发布微头条。
 
 路径规则：

@@ -37,6 +37,19 @@
     "first_publish": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div:nth-child(4) > div.edit-input > div > div.exclusive-checkbox-wraper > label > span",
     "sync_weitoutiao": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div.form-item > div > div.edit-input > span > label",
     "work_declaration": "#root > div > div.left-column > div > div.form-wrap > div.form-container > div.source-wrap > div > div.edit-input > div > div",
+    "source": {
+      "network": ".source-wrap label:has-text('取材网络')",
+      "internal": ".source-wrap label:has-text('引用站内')",
+      "personal_opinion": ".source-wrap label:has-text('个人观点，仅供参考')",
+      "ai": ".source-wrap label:has-text('引用AI')",
+      "fiction": ".source-wrap label:has-text('虚构演绎，故事经历')",
+      "investment": ".source-wrap label:has-text('投资观点，仅供参考')",
+      "health": ".source-wrap label:has-text('健康医疗分享，仅供参考')"
+    },
+    "buttons": {
+      "preview_and_publish": "#root > div > div.left-column > div > div.publish-footer.inline-editor > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.publish-btn.publish-btn-last",
+      "confirm_publish": "#root > div > div.left-column > div > div.publish-footer.inline-editor > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.publish-btn.publish-btn-last"
+    },
     "preview_and_publish": "#root > div > div.left-column > div > div.publish-footer.inline-editor > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.publish-btn.publish-btn-last",
     "confirm_publish": "#root > div > div.left-column > div > div.publish-footer.inline-editor > div > button.byte-btn.byte-btn-primary.byte-btn-size-large.byte-btn-shape-square.publish-btn.publish-btn-last"
   },

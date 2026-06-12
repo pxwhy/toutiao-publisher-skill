@@ -82,6 +82,7 @@ def run_publish(args: argparse.Namespace, payload: dict, state_path: Path, run_d
         raise ValueError("publish_mode 只能是 auto 或 draft")
 
     content_blocks = prepare_content_blocks(payload["content_blocks"], run_dir / "content-images", account)
+    expected_content_images = sum(1 for block in content_blocks if block["type"] == "image")
     cover_image_paths = prepare_images(cover_image_values(payload), run_dir / "cover-images", account)
     write_log(
         log,
@@ -111,9 +112,11 @@ def run_publish(args: argparse.Namespace, payload: dict, state_path: Path, run_d
             detect_verification(page)
             fill_title(page, title, selectors)
             fill_content_blocks(page, content_blocks, selectors, log)
+            assert_content_image_count(page, selectors, expected_content_images, log)
             handle_cover(page, cover_image_paths, selectors, log, publish_options.get("cover_mode", ""))
             upload_cover_image(page, cover_image_paths, selectors, log)
             handle_publish_options(page, selectors, publish_options, log)
+            assert_content_image_count(page, selectors, expected_content_images, log)
             take_screenshot(page, run_dir / "before_publish.png")
 
             published = False
@@ -271,29 +274,27 @@ def editor_locator(page, selectors: dict):
 
 
 def fill_content_blocks(page, blocks: list[dict], selectors: dict, log) -> None:
-    editor = editor_locator(page, selectors)
-    editor.click(timeout=3000)
+    focus_editor_end(page, selectors)
     for block in blocks:
         block_type = block["type"]
         if block_type == "heading":
-            insert_editor_text(page, editor, f"{block['text']}\n\n")
+            insert_editor_text(page, selectors, f"{block['text']}\n\n")
             write_log(log, f"inserted heading: {block['text'][:30]}")
             continue
         if block_type == "paragraph":
-            insert_editor_text(page, editor, f"{block['text']}\n\n")
+            insert_editor_text(page, selectors, f"{block['text']}\n\n")
             continue
         if block_type == "image":
-            insert_single_content_image(page, block["path"], log)
+            insert_single_content_image(page, selectors, block["path"], log)
             if block.get("caption"):
-                insert_editor_text(page, editor, f"{block['caption']}\n\n")
+                insert_editor_text(page, selectors, f"{block['caption']}\n\n")
             continue
     write_log(log, f"inserted content blocks: {len(blocks)}")
 
 
-def insert_editor_text(page, editor, text: str) -> None:
+def insert_editor_text(page, selectors: dict, text: str) -> None:
     dismiss_editor_overlay(page)
-    editor.click(timeout=3000)
-    page.keyboard.press("End")
+    editor = focus_editor_end(page, selectors)
     try:
         page.keyboard.insert_text(text)
     except Exception:
@@ -378,21 +379,77 @@ def handle_cover(page, image_paths: list[Path], selectors: dict, log, cover_mode
     set_checked_selector(page, selector, True, log, f"cover mode {normalized_mode}")
 
 
-def insert_single_content_image(page, image_path: Path, log) -> None:
+def insert_single_content_image(page, selectors: dict, image_path: Path, log) -> None:
     try:
-        editor = page.locator("[contenteditable='true']").first
-        editor.click(timeout=5000)
-        page.keyboard.press("End")
+        focus_editor_end(page, selectors)
     except Exception:
         pass
+    before_count = content_image_count(page, selectors)
     try:
         page.locator(".syl-toolbar-tool.image.static").first.click(timeout=8000)
         upload_images_from_open_dialog(page, [image_path], log, "content image")
         close_drawer_if_visible(page, log)
-        write_log(log, f"inserted content image: {display_path(image_path)}")
+        after_count = wait_content_image_increment(page, selectors, before_count, timeout_ms=15000)
+        write_log(log, f"inserted content image: {display_path(image_path)} count={before_count}->{after_count}")
     except Exception as exc:
         close_drawer_if_visible(page, log)
-        write_log(log, f"toutiao content image upload skipped/failed: {exc}")
+        raise RuntimeError(f"正文图片插入失败：{display_path(image_path)}: {exc}") from exc
+
+
+def focus_editor_end(page, selectors: dict):
+    editor = editor_locator(page, selectors)
+    editor.click(timeout=5000)
+    editor.evaluate(
+        """
+        (element) => {
+          const root = element.closest('.ProseMirror') || element;
+          root.focus();
+          const range = document.createRange();
+          range.selectNodeContents(root);
+          range.collapse(false);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          root.dispatchEvent(new Event('focus', { bubbles: true }));
+        }
+        """
+    )
+    page.wait_for_timeout(200)
+    return editor
+
+
+def content_image_count(page, selectors: dict) -> int:
+    try:
+        editor = editor_locator(page, selectors)
+        return int(editor.evaluate(
+            """
+            (element) => {
+              const root = element.closest('.ProseMirror') || element;
+              return root.querySelectorAll('img').length;
+            }
+            """
+        ))
+    except Exception:
+        return int(page.locator("[contenteditable='true'] img, .ProseMirror img").count())
+
+
+def wait_content_image_increment(page, selectors: dict, before_count: int, timeout_ms: int = 15000) -> int:
+    deadline = time.time() + timeout_ms / 1000
+    last_count = before_count
+    while time.time() < deadline:
+        dismiss_editor_overlay(page)
+        last_count = content_image_count(page, selectors)
+        if last_count > before_count:
+            return last_count
+        page.wait_for_timeout(500)
+    raise RuntimeError(f"正文图片未实际插入，当前数量 {last_count}，插入前 {before_count}")
+
+
+def assert_content_image_count(page, selectors: dict, expected_count: int, log) -> None:
+    actual_count = content_image_count(page, selectors)
+    write_log(log, f"content image count check: actual_dom_images={actual_count} expected_blocks={expected_count}")
+    if actual_count < expected_count:
+        raise RuntimeError(f"正文图片数量不足：实际 DOM 图片 {actual_count}，期望正文图片块 {expected_count}")
 
 
 def upload_cover_image(page, image_paths: list[Path], selectors: dict, log) -> None:
